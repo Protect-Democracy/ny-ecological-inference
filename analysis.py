@@ -10,6 +10,7 @@
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pyei.r_by_c import RowByColumnEI
@@ -17,6 +18,40 @@ from pyei.r_by_c import RowByColumnEI
 
 with Path.open("results.json", "r") as f:
     data = json.load(f)
+
+for race in data["results"]["ballotItems"]:
+    if "President" in race["name"]:
+        for candidate in race["ballotOptions"]:
+            if "harris" in candidate["name"].lower():
+                for precinct in candidate["precinctResults"]:
+                    vote_count = precinct["voteCount"]
+                    if (
+                        "ramapo" in precinct["name"].lower()
+                        and "98" in precinct["name"].lower()
+                    ):
+                        print(
+                            "Harris votes in ",
+                            precinct["name"].split("(")[0].lower().strip(),
+                            "",
+                            vote_count,
+                        )
+    if "United States Senator" in race["name"]:
+        for candidate in race["ballotOptions"]:
+            if "gillibrand" in candidate["name"].lower():
+                for precinct in candidate["precinctResults"]:
+                    vote_count = precinct["voteCount"]
+                    if (
+                        "ramapo" in precinct["name"].lower()
+                        and "98" in precinct["name"].lower()
+                    ):
+                        print(
+                            "Senate D votes in ",
+                            precinct["name"].split("(")[0].lower().strip(),
+                            "",
+                            vote_count,
+                        )
+
+candidate["name"]
 
 
 def extract_df_from_results(data=data):
@@ -97,7 +132,7 @@ def extract_df_from_results(data=data):
 results = extract_df_from_results()
 
 registered_voters = pd.read_csv("registered_voters.csv", index_col=0)
-
+registered_voters["lastname"] = registered_voters["lastname"].astype(int)
 r = results.merge(registered_voters, left_index=True, right_index=True, how="outer")
 
 group_fractions = r[["Votes_Harris", "Votes_Trump", "Votes_President_Other"]].astype(
@@ -117,15 +152,13 @@ votes_fractions = np.concat(
     [votes_fractions, 1.0 - np.sum(votes_fractions, axis=0).reshape(1, -1)], axis=0
 )
 
-r[["Votes_Senate_D", "Votes_Senate_R", "Votes_Senate_Other", "lastname"]]
-
-r[["Votes_Harris", "Votes_Trump", "Votes_President_Other", "lastname"]]
+registered_voters
 
 ei = RowByColumnEI(model_name="multinomial-dirichlet")
 ei.fit(
     group_fractions,
     votes_fractions,
-    registered_voters.to_numpy(),
+    registered_voters["lastname"].to_numpy(),
     ["Harris", "Trump", "POTUS Other", "No Vote"],
     ["Senate_D", "Senate_R", "Senate Other", "No Vote"],
     progressbar=True,
@@ -139,3 +172,67 @@ means = pd.DataFrame(
     index=["Senate_D", "Senate_R", "Senate Other", "No Vote"],
 )
 print(means)
+
+precinct_level_samples = np.transpose(
+    ei.sim_trace["posterior"]["b"].stack(all_draws=["chain", "draw"]).values,
+    axes=(3, 0, 1, 2),
+)
+
+outliers = [
+    "Ramapo 109",
+    "Ramapo 111",
+    "Ramapo 117",
+    "Ramapo 118",
+    "Ramapo 21",
+    "Ramapo 35",
+    "Ramapo 45",
+    "Ramapo 55",
+    "Ramapo 58",
+    "Ramapo 95",
+    "Ramapo 97",
+    "Ramapo 98",
+]
+
+outliers = [
+    "clarkstown 1",
+    "clarkstown 10",
+    "stony point 5",
+    "stony point 6",
+    "stony point 7",
+]
+
+bins = np.linspace(0, 1.0, 50)
+for outlier in outliers:
+    idx = np.where(r.index == outlier.lower())[0]
+    print(idx)
+    x = precinct_level_samples[:, idx, :, :].reshape(-1, 4, 4)
+    fig = plt.figure(figsize=[6, 10])
+    plt.subplot(311)
+    plt.hist(x[:, 0, 0], bins=bins, density=True, label="Harris %")
+    plt.hist(x[:, 0, 1], bins=bins, density=True, label="Trump %")
+    plt.hist(x[:, 0, 2], bins=bins, density=True, label="Other %")
+    plt.hist(x[:, 0, 3], bins=bins, density=True, label="No Vote %")
+    plt.title("Senate D")
+    plt.legend()
+    plt.subplot(312)
+    plt.hist(x[:, 1, 0], bins=bins, density=True, label="Harris %")
+    plt.hist(x[:, 1, 1], bins=bins, density=True, label="Trump %")
+    plt.hist(x[:, 1, 2], bins=bins, density=True, label="Other %")
+    plt.hist(x[:, 1, 3], bins=bins, density=True, label="No Vote %")
+    plt.title("Senate R")
+    plt.legend()
+    plt.subplot(313)
+    plt.hist(x[:, 3, 0], bins=bins, density=True, label="Harris %")
+    plt.hist(x[:, 3, 1], bins=bins, density=True, label="Trump %")
+    plt.hist(x[:, 3, 2], bins=bins, density=True, label="Other %")
+    plt.hist(x[:, 3, 3], bins=bins, density=True, label="No Vote %")
+    plt.title("Senate No Vote")
+    plt.legend()
+    plt.suptitle(outlier)
+    plt.tight_layout()
+    plt.show()
+
+r
+r.iloc[290].T
+
+r.iloc[idx].T
